@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta content="width=device-width, initial-scale=1.0"
+        name="viewport">
+  <meta content="ie=edge" http-equiv="X-UA-Compatible">
+  <title>html 2d rendering</title>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      padding: 0;
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    .controls {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(100, 1px);
+    }
+
+    .cell {
+      width: 1px;
+      height: 1px;
+    }
+
+    .cell.live {
+      background-color: red;
+    }
+  </style>
+</head>
+<body>
+<div class="controls">
+  <button id="toggle">start/stop</button>
+</div>
+<div id="scene"></div>
+
+<script type="module">
+  import {
+    endMeasurement,
+    initMeasurement,
+    startMeasurement,
+  } from '../utils/perf.mjs';
+
+  (function () {
+    // Grid size
+    const width = 100;
+    const height = 100;
+
+    // Grab used HTML elements
+    const scene = document.getElementById('scene');
+    const toggleButton = document.getElementById('toggle');
+
+    // Setup state
+    // To avoid searching for each HTML element on render I'll cache those elements in an array
+    // Indexed accordingly to state of the game of life
+    const cells = [];
+    let state = [];
+    let isPaused = false;
+
+    function initState() {
+      // Initialize the state with random 2d array
+      for (let i = 0; i < width; i++) {
+        state[i] = [];
+        for (let j = 0; j < height; j++) {
+          state[i][j] = Math.random() > 0.5 ? 0 : 1;
+        }
+      }
+    }
+
+    function initScene() {
+      // Create container for the cells
+      const gridElement = document.createElement('div');
+      gridElement.classList.add('grid');
+
+      for (let i = 0; i < width; i++) {
+        cells[i] = [];
+        for (let j = 0; j < height; j++) {
+          // Create cell as div element
+          const cell = document.createElement('div');
+          cell.classList.add('cell');
+          // Since we are working on element is not yet attached to the DOM
+          // we can push children directly
+          // otherwise we should work on the document fragment
+          gridElement.appendChild(cell);
+          cells[i][j] = cell;
+        }
+      }
+
+      // Attach the grid to the document
+      scene.appendChild(gridElement);
+    }
+
+    function init() {
+      initMeasurement('update', {
+        printAvgAfterTime: 5000
+      });
+
+      initMeasurement('render', {
+        printAvgAfterTime: 5000
+      })
+
+      // Update state and render scene
+      initState();
+      initScene();
+
+      // Handle start/stop button click
+      toggleButton.addEventListener('click', toggleAnimation);
+    }
+
+    function tick() {
+      // Update state and render scene
+      update();
+      render();
+
+      // Check if we have stopped
+      if (!isPaused) {
+        // Repeat tick in the next frame
+        requestAnimationFrame(tick);
+      }
+    }
+
+    function getCellAt(x, y) {
+      // Get the state of the cell by coords
+      if (x > 0 && x < width && y > 0 && y < height) {
+        return state[x][y];
+      }
+
+      // Fallback to 0 if out of bounds
+      return 0;
+    }
+
+    function update() {
+      startMeasurement('update');
+      // Create placeholder for the new state
+      const newState = [];
+      for (let i = 0; i < width; i++) {
+        newState[i] = [];
+        for (let j = 0; j < height; j++) {
+
+          // get the sum of the neighbours
+          const sum =
+            getCellAt(i - 1, j - 1) +
+            getCellAt(i, j - 1) +
+            getCellAt(i + 1, j - 1) +
+            getCellAt(i - 1, j) +
+            getCellAt(i + 1, j) +
+            getCellAt(i - 1, j + 1) +
+            getCellAt(i, j + 1) +
+            getCellAt(i + 1, j + 1);
+
+          // Game of life login
+          if (sum === 3) {
+            newState[i][j] = 1;
+          } else if (sum === 2) {
+            newState[i][j] = state[i][j];
+          } else {
+            newState[i][j] = 0;
+          }
+        }
+      }
+
+      // Update the state with next generation
+      state = newState;
+
+      endMeasurement('update');
+    }
+
+    function render() {
+      startMeasurement('render');
+
+      // Set the state for each cell by setting the class
+      for (let i = 0; i < width; i++) {
+        for (let j = 0; j < height; j++) {
+          // Cells and the state are indexed in the same way
+          // Making it very straightforward
+          cells[i][j].classList.toggle('live', state[i][j]);
+        }
+      }
+
+      endMeasurement('render');
+    }
+
+    function main() {
+      init();
+
+      // Make an initial tick call
+      requestAnimationFrame(tick);
+    }
+
+    function toggleAnimation() {
+      isPaused = !isPaused;
+      requestAnimationFrame(tick);
+    }
+
+    main();
+  })();
+</script>
+</body>
+</html>

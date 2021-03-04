@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta content="width=device-width, initial-scale=1.0"
+        name="viewport">
+  <meta content="ie=edge" http-equiv="X-UA-Compatible">
+  <title>html 2d rendering</title>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      padding: 0;
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    .controls {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .canvas {
+      display: block;
+      image-rendering: optimizeSpeed;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: -o-crisp-edges;
+      image-rendering: pixelated;
+      -ms-interpolation-mode: nearest-neighbor;
+    }
+  </style>
+</head>
+<body>
+<div class="controls">
+  <button id="toggle">start/stop</button>
+</div>
+<canvas class="canvas" id="scene"></canvas>
+
+</body>
+<script>
+  (function () {
+    // For simplicity the size of the scene is
+    // Equal to the size of the canvas
+    // Which is equal to the size of the texture
+    const width = 800;
+    const height = 800;
+
+    // Grab used HTML elements
+    const scene = document.getElementById('scene');
+    const toggleButton = document.getElementById('toggle');
+
+    // Get context of the canvas
+    const gl = scene.getContext('webgl2');
+
+    // Setup some state
+    let isPaused = true;
+
+    function createShader(type, source) {
+      // Create WebGl Shader from GLSL source and compile it
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+
+      // Check if the compilation went without any issues
+      const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+      if (success) {
+        return shader;
+      }
+
+      // Log any errors
+      console.log(gl.getShaderInfoLog(shader));
+
+      // Clean up after yourself
+      gl.deleteShader(shader);
+    }
+
+    function createProgram(vertexShader, fragmentShader) {
+      // Create WebGl program attach previously compiled shaders and link it
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+
+      // Check if the linking went without any issues
+      const success = gl.getProgramParameter(program, gl.LINK_STATUS);
+      if (success) {
+        return program;
+      }
+
+      // Log any errors
+      console.log(gl.getProgramInfoLog(program));
+
+      // Clean up after yourself
+      gl.deleteProgram(program);
+    }
+
+    // Define source of the vertex shader in GLSL
+    // It's simple pass-through program
+    const vertexShaderSource = `#version 300 es
+      in vec4 a_position;
+
+      void main() {
+        gl_Position = a_position;
+      }
+    `;
+
+    // Define source of the fragment shader in GLSL
+    // It's responsible for rendering state on the plane
+    const displayFragmentShaderSource = `#version 300 es
+      precision highp float;
+
+      uniform sampler2D texPrint;
+      out vec4 outColor;
+
+      void main() {
+        ivec2 texelCoord = ivec2(gl_FragCoord.xy);
+
+        // Get current cell value
+        vec4 value = texelFetch(texPrint, texelCoord, 0);
+
+        if(value.r > 0.0) {
+          // render alive cell as black
+          outColor = vec4(0., 0., 0., 1);
+        } else {
+          // render dead cell as white
+          outColor = vec4(1., 1., 1., 1);
+        }
+      }
+    `;
+
+    // Define source of the fragment shader in GLSL
+    // It's responsible for updating the state of the game
+    // Based on the previous state
+    const fragmentShaderSource = `#version 300 es
+      precision highp float;
+      uniform sampler2D tex;
+
+      out vec4 outColor;
+      ivec2 texSize;
+
+      // Get the value of the node from the coord of the current node
+      // offsetted by the offset
+      int get(ivec2 offset) {
+        // Get the current coords as the int vector of two values
+        ivec2 currCoord = ivec2(gl_FragCoord.xy);
+
+        // Calculate the "neighbour" coords
+        ivec2 newCoord = currCoord + offset;
+
+        // Get the state of the cell by new coords
+        if(
+          newCoord.x >= 0 &&
+          newCoord.x < texSize.x &&
+          newCoord.y >= 0 &&
+          newCoord.y < texSize.y
+        ) {
+          if(texelFetch(tex, newCoord, 0).r > 0.0) {
+            return 1;
+          } else {
+            return 0;
+          }
+        }
+
+        // Fallback to 0 if out of bounds
+        return 0;
+      }
+
+      void main() {
+        // Set the global variable to the
+        // Size of the currently used texture
+        texSize = textureSize(tex, 0);
+
+        // Get the values of all the neighbours
+        int nwValue       = get(ivec2(-1, -1));
+        int nValue        = get(ivec2(0, -1));
+        int neValue       = get(ivec2(1, -1));
+        int wValue        = get(ivec2(-1, 0));
+        int currentValue  = get(ivec2(0, 0));
+        int eValue        = get(ivec2(1, 0));
+        int swValue       = get(ivec2(-1, 1));
+        int sValue        = get(ivec2(0, 1));
+        int seValue       = get(ivec2(1, 1));
+
+        int sum = nwValue + nValue + neValue + wValue + eValue + swValue + sValue + seValue;
+
+        // Execute the logic of the Game Of Life
+        // If the cell is alive it'll be clack
+        // If the cell is dead it'll be white
+        if (sum == 3) {
+          outColor = vec4(1.0, 1.0, 1.0, 1.0);
+        } else if (sum == 2) {
+          outColor = vec4(float(currentValue), float(currentValue), float(currentValue), 1.0);
+        } else {
+          outColor = vec4(0.0, 0.0, 0.0, 1.0);
+        }
+      }
+    `;
+
+    // Create Shaders from sources
+    const vertexShader = createShader(gl.VERTEX_SHADER, vertexShaderSource);
+    const displayFragmentShader = createShader(gl.FRAGMENT_SHADER, displayFragmentShaderSource);
+    const fragmentShader = createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+    // Create program for updating the state
+    const computeProgram = createProgram(vertexShader, fragmentShader);
+    const computeProgramPositionAttribute = gl.getAttribLocation(computeProgram, 'a_position');
+    const computeProgramTexLocation = gl.getUniformLocation(computeProgram, 'tex');
+
+    // Create a program for displaying the state onto the canvas
+    const displayProgram = createProgram(vertexShader, displayFragmentShader);
+    const displayProgramPositionAttribute = gl.getAttribLocation(displayProgram, 'a_position');
+    const displayProgramTexPrintLocation = gl.getUniformLocation(displayProgram, 'texPrint');
+
+    // Create initial random state
+    const seedData = new Uint8Array(new Array(width * height).fill(0).map(_ => Number(Math.random() > 0.5)));
+
+    // Define a 2D texture as our state
+    const texture1 = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture1);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, seedData);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    // Define a buffer with texture attached to be able to
+    // Render onto the texture instead of canvas
+    const framebuffer1 = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer1);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture1, 0);
+
+    // Define a 2D texture as our state
+    const texture2 = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture2);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    // Define a buffer with texture attached to be able to
+    // Render onto the texture instead of canvas
+    const framebuffer2 = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer2);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture2, 0);
+
+    // Set the current state and next state variables
+    // We will read from one and write to another and the swap them
+    let currentState = [framebuffer1, texture1];
+    let nextState = [framebuffer2, texture2];
+
+    // Create buffer defining plane that we will render state on
+    // Since we render triangles we need to define two of those what will cover
+    // the whole canvas
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+
+    // Attach this plane to both render and display programs
+    gl.enableVertexAttribArray(computeProgramPositionAttribute);
+    gl.vertexAttribPointer(computeProgramPositionAttribute, 2, gl.FLOAT, false, 0, 0);
+
+    gl.enableVertexAttribArray(displayProgramPositionAttribute);
+    gl.vertexAttribPointer(displayProgramPositionAttribute, 2, gl.FLOAT, false, 0, 0);
+
+    function initScene() {
+      // Setup the scene size
+      scene.width = width;
+      scene.height = height;
+      scene.style.width = width + 'px';
+      scene.style.height = height + 'px';
+    }
+
+    function init() {
+      // Initialize canvas
+      initScene();
+
+      // Handle start/stop button click
+      toggleButton.addEventListener('click', toggleAnimation);
+    }
+
+    function tick() {
+      // Update state and render scene
+      update();
+      render();
+
+      // Check if we have stopped
+      if (!isPaused) {
+        // Repeat tick in the next frame
+        requestAnimationFrame(tick);
+      }
+    }
+
+    function update() {
+      // Set compute program as current one
+      gl.useProgram(computeProgram);
+
+      // Set next state buffer as destination of new state
+      gl.bindFramebuffer(gl.FRAMEBUFFER, nextState[0]);
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+      // Don't quite understand that part
+      // But basically we set the texture of currentState
+      // to be the one used in the program as input
+      gl.uniform1i(computeProgramTexLocation, 0);
+      gl.activeTexture(gl.TEXTURE0 + 0);
+      gl.bindTexture(gl.TEXTURE_2D, currentState[1]);
+
+      // "draw" scene onto framebuffer
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+      // Swap states
+      const tmpState = currentState;
+      currentState = nextState;
+      nextState = tmpState;
+    }
+
+
+    function render() {
+      // Set display program as current one
+      gl.useProgram(displayProgram);
+
+      // Unbind framebuffer so we'll render directly onto canvas
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+      // Don't quite understand that part
+      // But basically we set the texture of currentState
+      // to be the one used in the program as an input
+      gl.uniform1i(displayProgramTexPrintLocation, 0);
+      gl.activeTexture(gl.TEXTURE0 + 0);
+      gl.bindTexture(gl.TEXTURE_2D, currentState[1]);
+
+      // Render scene onto the canvas
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    function main() {
+      init();
+
+      // Make an initial tick call
+      requestAnimationFrame(tick);
+    }
+
+    function toggleAnimation() {
+      isPaused = !isPaused;
+      requestAnimationFrame(tick);
+    }
+
+    main();
+  })();
+</script>
+</html>

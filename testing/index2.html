@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0"
+        name="viewport">
+  <meta content="ie=edge" http-equiv="X-UA-Compatible">
+  <title>Document</title>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    canvas {
+      border: 1px solid black;
+    }
+  </style>
+</head>
+<body>
+
+<canvas></canvas>
+
+<script src="https://twgljs.org/dist/2.x/twgl.min.js"></script>
+<script>
+  var vs = `#version 300 es
+    in vec4 a_position;
+
+    void main() {
+      gl_Position = a_position;
+    }
+`;
+
+  var colorFS = `#version 300 es
+    precision highp float;
+
+    uniform vec4 color;
+    out vec4 outColor;
+
+    void main() {
+      outColor = color;
+    }
+`;
+
+  var mixFS = `#version 300 es
+    precision highp float;
+
+    uniform sampler2D tex1;
+    uniform sampler2D tex2;
+
+    out vec4 outColor;
+
+    void main() {
+      // probably should use different texture coords for each
+      // texture for more flexibility but I'm lazy
+      ivec2 texSize = textureSize(tex1, 0);
+      if(int(gl_FragCoord.x) < (texSize.x * 1 / 3)) {
+        outColor = texelFetch(tex1, ivec2(gl_FragCoord.xy), 0);
+      } else if (int(gl_FragCoord.x) > (texSize.x  * 2/ 3)) {
+        outColor = texelFetch(tex2, ivec2(gl_FragCoord.xy), 0);
+      } else {
+        outColor = mix(texelFetch(tex1, ivec2(gl_FragCoord.xy), 0), texelFetch(tex2, ivec2(gl_FragCoord.xy), 0), 0.5);
+      }
+    }
+`;
+
+  const gl = document.querySelector('canvas').getContext('webgl2');
+  const colorProgram = twgl.createProgramFromSources(gl, [vs, colorFS]);
+  const mixProgram = twgl.createProgramFromSources(gl, [vs, mixFS]);
+
+  // make 2 textures by attaching them to framebuffers and rendering to them
+  const texFbPair1 = createTextureAndFramebuffer(gl, gl.canvas.width, gl.canvas.height);
+  const texFbPair2 = createTextureAndFramebuffer(gl, gl.canvas.width, gl.canvas.height);
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1,
+    1, -1,
+    -1, 1,
+    -1, 1,
+    1, -1,
+    1, 1,
+  ]), gl.STATIC_DRAW);
+
+  function setAttributes(buf, positionLoc) {
+    gl.enableVertexAttribArray(positionLoc);
+    gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+  }
+
+  const colorPrgPositionLoc = gl.getAttribLocation(colorProgram, 'a_position');
+  setAttributes(buf, colorPrgPositionLoc);
+  const colorLoc = gl.getUniformLocation(colorProgram, 'color');
+
+  // draw red rect to first texture through the framebuffer it's attached to
+  gl.useProgram(colorProgram);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, texFbPair1.fb);
+  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+  gl.uniform4fv(colorLoc, [1, 0, 0, 1]);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+  // Draw a blue rect to the second texture through the framebuffer it's attached to
+  gl.bindFramebuffer(gl.FRAMEBUFFER, texFbPair2.fb);
+  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+  gl.uniform4fv(colorLoc, [0, 0, 1, 1]);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+  // Draw both textures to the canvas
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+  const mixPrgPositionLoc = gl.getAttribLocation(mixProgram, 'a_position');
+  setAttributes(buf, mixPrgPositionLoc);
+
+  const tex1Loc = gl.getUniformLocation(mixProgram, 'tex1');
+  const tex2Loc = gl.getUniformLocation(mixProgram, 'tex2');
+
+  gl.useProgram(mixProgram);
+
+  gl.uniform1i(tex1Loc, 0);
+  gl.uniform1i(tex2Loc, 1);
+  gl.activeTexture(gl.TEXTURE0 + 0);
+  gl.bindTexture(gl.TEXTURE_2D, texFbPair1.tex);
+  gl.activeTexture(gl.TEXTURE0 + 1);
+  gl.bindTexture(gl.TEXTURE_2D, texFbPair2.tex);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+  function createTextureAndFramebuffer(gl, width, height) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    return {tex: tex, fb: fb};
+  }
+</script>
+</body>
+</html>
