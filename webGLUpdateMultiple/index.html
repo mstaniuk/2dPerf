@@ -26,6 +26,7 @@
 
     .canvas {
       display: block;
+      background: red;
       image-rendering: optimizeSpeed;
       image-rendering: -moz-crisp-edges;
       image-rendering: -webkit-optimize-contrast;
@@ -47,18 +48,21 @@
     // For simplicity the size of the scene is
     // Equal to the size of the canvas
     // Which is equal to the size of the texture
-    const width = 800;
-    const height = 800;
+    const width = 2000;
+    const height = 2000;
 
     // Grab used HTML elements
     const scene = document.getElementById('scene');
     const toggleButton = document.getElementById('toggle');
 
     // Get context of the canvas
-    const gl = scene.getContext('webgl2');
+    const gl = scene.getContext('webgl2', {
+      premultipliedAlpha: true,
+      alpha: true,
+    });
 
     // Setup some state
-    let isPaused = false;
+    let isPaused = true;
 
     function createShader(type, source) {
       // Create WebGl Shader from GLSL source and compile it
@@ -118,18 +122,8 @@
       out vec4 outColor;
 
       void main() {
-        ivec2 texelCoord = ivec2(gl_FragCoord.xy);
-
-        // Get current cell value
-        vec4 value = texelFetch(texPrint, texelCoord, 0);
-
-        if(value.r > 0.0) {
-          // render alive cell as black
-          outColor = vec4(0., 0., 0., 1);
-        } else {
-          // render dead cell as white
-          outColor = vec4(1., 1., 1., 1);
-        }
+        ivec2 texCoord = ivec2(gl_FragCoord.x, 1.0 - gl_FragCoord.y);
+        outColor = texelFetch(texPrint, ivec2(gl_FragCoord.xy), 0);
       }
     `;
 
@@ -141,62 +135,45 @@
       uniform sampler2D tex;
 
       out vec4 outColor;
-      ivec2 texSize;
-
-      // Get the value of the node from the coord of the current node
-      // offsetted by the offset
-      int get(ivec2 offset) {
-        // Get the current coords as the int vector of two values
-        ivec2 currCoord = ivec2(gl_FragCoord.xy);
-
-        // Calculate the "neighbour" coords
-        ivec2 newCoord = currCoord + offset;
-
-        // Get the state of the cell by new coords
-        if(
-          newCoord.x >= 0 &&
-          newCoord.x < texSize.x &&
-          newCoord.y >= 0 &&
-          newCoord.y < texSize.y
-        ) {
-          if(texelFetch(tex, newCoord, 0).r > 0.0) {
-            return 1;
-          } else {
-            return 0;
-          }
-        }
-
-        // Fallback to 0 if out of bounds
-        return 0;
-      }
 
       void main() {
-        // Set the global variable to the
-        // Size of the currently used texture
-        texSize = textureSize(tex, 0);
+        ivec2 currCoord = ivec2(gl_FragCoord.xy);
+        vec4 colorSum =
+          texelFetch(tex, currCoord + ivec2(-1, -1), 0) +
+          texelFetch(tex, currCoord + ivec2( 0, -1), 0) +
+          texelFetch(tex, currCoord + ivec2( 1, -1), 0) +
+          texelFetch(tex, currCoord + ivec2(-1,  0), 0) +
+          texelFetch(tex, currCoord + ivec2( 1,  0), 0) +
+          texelFetch(tex, currCoord + ivec2(-1,  1), 0) +
+          texelFetch(tex, currCoord + ivec2( 0,  1), 0) +
+          texelFetch(tex, currCoord + ivec2( 1,  1), 0) ;
 
-        // Get the values of all the neighbours
-        int nwValue       = get(ivec2(-1, -1));
-        int nValue        = get(ivec2(0, -1));
-        int neValue       = get(ivec2(1, -1));
-        int wValue        = get(ivec2(-1, 0));
-        int currentValue  = get(ivec2(0, 0));
-        int eValue        = get(ivec2(1, 0));
-        int swValue       = get(ivec2(-1, 1));
-        int sValue        = get(ivec2(0, 1));
-        int seValue       = get(ivec2(1, 1));
+        vec4 currentValue = texelFetch(tex, currCoord, 0);
 
-        int sum = nwValue + nValue + neValue + wValue + eValue + swValue + sValue + seValue;
+        outColor = vec4(0.0, 0.0, 0.0, 0.5);
 
-        // Execute the logic of the Game Of Life
-        // If the cell is alive it'll be clack
-        // If the cell is dead it'll be white
-        if (sum == 3) {
-          outColor = vec4(1.0, 1.0, 1.0, 1.0);
-        } else if (sum == 2) {
-          outColor = vec4(float(currentValue), float(currentValue), float(currentValue), 1.0);
+        if (int(colorSum.r) == 3) {
+          outColor.r = 1.0;
+        } else if (int(colorSum.r) == 2) {
+          outColor.r = currentValue.r;
         } else {
-          outColor = vec4(0.0, 0.0, 0.0, 1.0);
+          outColor.r = 0.;
+        }
+
+        if (int(colorSum.g) == 3) {
+          outColor.g = 1.0;
+        } else if (int(colorSum.g) == 2) {
+          outColor.g = currentValue.g;
+        } else {
+          outColor.g = 0.;
+        }
+
+        if (int(colorSum.b) == 3) {
+          outColor.b = 1.0;
+        } else if (int(colorSum.b) == 2) {
+          outColor.b = currentValue.b;
+        } else {
+          outColor.b = 0.;
         }
       }
     `;
@@ -217,13 +194,13 @@
     const displayProgramTexPrintLocation = gl.getUniformLocation(displayProgram, 'texPrint');
 
     // Create initial random state
-    const seedData = new Uint8Array(new Array(width * height).fill(0).map(_ => Number(Math.random() > 0.5)));
+    const seedData = new Uint8Array(new Array(width * height * 3).fill(0).map(_ => Number(Math.random() > 0.5) * 255));
 
     // Define a 2D texture as our state
     const texture1 = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture1);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, seedData);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, seedData);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -238,8 +215,8 @@
     // Define a 2D texture as our state
     const texture2 = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture2);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

@@ -37,7 +37,9 @@
 </head>
 <body>
 <div class="controls">
-  <button id="toggle">start/stop</button>
+  <div>
+    <button id="toggle">start/stop</button>
+  </div>
 </div>
 <canvas class="canvas" id="scene"></canvas>
 
@@ -50,8 +52,8 @@
 
   // For simplicity the size of the scene is
   // Equal to the size of the canvas
-  const width = 100;
-  const height = 100;
+  const width = 600;
+  const height = 600;
 
   // Grab used HTML elements
   const scene = document.getElementById('scene');
@@ -66,10 +68,10 @@
 
   function initState() {
     // Initialize the state with random 2d array
-    for (let x = 0; x < width; x++) {
-      state[x] = [];
-      for (let y = 0; y < height; y++) {
-        state[x][y] = Math.random() > 0.5 ? 0 : 1;
+    for (let i = 0; i < width; i++) {
+      state[i] = [];
+      for (let j = 0; j < height; j++) {
+        state[i][j] = Math.random() > 0.5 ? 0 : 1;
       }
     }
   }
@@ -124,32 +126,39 @@
     return 0;
   }
 
+  // Draw single cell
+  function drawCellAt(x, y, state) {
+    if (state) {
+      ctx.rect(x, y, 1, 1);
+    }
+  }
+
   function update() {
     startMeasurement('update');
     // Create placeholder for the new state
     const newState = [];
-    for (let x = 0; x < width; x++) {
-      newState[x] = [];
-      for (let y = 0; y < height; y++) {
+    for (let i = 0; i < width; i++) {
+      newState[i] = [];
+      for (let j = 0; j < height; j++) {
 
         // get the sum of the neighbours
         const sum =
-          getCellAt(x - 1, y - 1) +
-          getCellAt(x, y - 1) +
-          getCellAt(x + 1, y - 1) +
-          getCellAt(x - 1, y) +
-          getCellAt(x + 1, y) +
-          getCellAt(x - 1, y + 1) +
-          getCellAt(x, y + 1) +
-          getCellAt(x + 1, y + 1);
+          getCellAt(i - 1, j - 1) +
+          getCellAt(i, j - 1) +
+          getCellAt(i + 1, j - 1) +
+          getCellAt(i - 1, j) +
+          getCellAt(i + 1, j) +
+          getCellAt(i - 1, j + 1) +
+          getCellAt(i, j + 1) +
+          getCellAt(i + 1, j + 1);
 
         // Game of life login
         if (sum === 3) {
-          newState[x][y] = 1;
+          newState[i][j] = 1;
         } else if (sum === 2) {
-          newState[x][y] = state[x][y];
+          newState[i][j] = state[i][j];
         } else {
-          newState[x][y] = 0;
+          newState[i][j] = 0;
         }
       }
     }
@@ -161,32 +170,16 @@
 
   function render() {
     startMeasurement('render');
-    // Create blank image with the size of the canvas
-    const imageData = new ImageData(width, height);
-
-    // Save the reference to the data of the images
-    // Data represents colors for each pixel
-    const data = imageData.data;
-
-    for (let x = 0; x < width; x++) {
-      for (let y = 0; y < height; y++) {
-        // Since the imageData is 1 dimensional array
-        // We need to transform 2d coords to the position in 1d array
-        // And multiply each cell by 4 since each cell is represent by [R, G, B, A] quad
-        const cellOnImagePosition = ((y * (imageData.width * 4)) + (x * 4));
-
-        // Set the individual color values
-        // The dead cell will have [255, 255, 255, 255] color
-        // And live cell will have [0, 0, 0, 255] color
-        data[cellOnImagePosition + 0] = 255 - state[x][y] * 255; // Red
-        data[cellOnImagePosition + 1] = 255 - state[x][y] * 255; // Green
-        data[cellOnImagePosition + 2] = 255 - state[x][y] * 255; // Blue
-        data[cellOnImagePosition + 3] = 255; // Alpha
+    // Clear canvas from prev state
+    ctx.clearRect(0, 0, width, height);
+    ctx.beginPath();
+    // Draw state for each cell
+    for (let i = 0; i < width; i++) {
+      for (let j = 0; j < height; j++) {
+        drawCellAt(i, j, state[i][j]);
       }
     }
-
-    // Render generated image on canvas
-    ctx.putImageData(imageData, 0, 0);
+    ctx.fill();
     endMeasurement('render');
   }
 
